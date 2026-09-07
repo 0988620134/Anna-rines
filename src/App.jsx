@@ -35,11 +35,10 @@ if (firebaseEnabled) {
 }
 
 const appId = import.meta.env.VITE_FIREBASE_COLLECTION_ID || 'rines-charm-app';
-const GOOGLE_SHEET_WEBHOOK_URL = import.meta.env.VITE_GOOGLE_SHEET_WEBHOOK_URL || '';
 
-// ⚠️ 不要把 Gemini API Key 放進 VITE_* 變數：Vite 前端變數會被打包公開。
-// 若要啟用真正的 AI 分析，請設定一個由您控制、在伺服器端保存 API Key 的 proxy endpoint。
-const AI_PROXY_URL = import.meta.env.VITE_AI_PROXY_URL || '';
+// Google Apps Script Web App：同時負責 Gemini AI 與 Google Sheet 儲存。
+// 這個網址可以公開；Gemini API Key 必須只存放在 Apps Script 的 Script Properties。
+const BACKEND_WEBAPP_URL = import.meta.env.VITE_GOOGLE_SHEET_WEBHOOK_URL || '';
 
 // 公開靜態網站不應以前端明碼密碼保護管理資料。
 // 本專案預設停用後台登入；若要正式使用後台，請改用 Firebase Auth / 伺服器端驗證。
@@ -244,12 +243,116 @@ export default function App() {
     handleNextQuestion();
   };
 
+  const buildSheetPayload = (profileName = '') => {
+    const payload = {
+      userName,
+      resultProfile: profileName,
+      warmth: scores.Warmth,
+      freedom: scores.Freedom,
+      power: scores.Power
+    };
+
+    questions.forEach(q => {
+      const ansKey = answers[q.id];
+      if (!ansKey) {
+        payload['q' + q.id] = '';
+      } else if (q.type === 'single') {
+        payload['q' + q.id] = q.options?.[ansKey] ? `${ansKey}: ${q.options[ansKey]}` : String(ansKey);
+      } else if (q.type === 'multiple') {
+        const keys = String(ansKey).split(',').map(x => x.trim()).filter(Boolean);
+        payload['q' + q.id] = keys.map(k => q.options?.[k] ? `${k}: ${q.options[k]}` : k).join(' | ');
+      } else {
+        payload['q' + q.id] = String(ansKey);
+      }
+    });
+
+    return payload;
+  };
+
+  const postToAppsScript = (payload, timeoutMs = 70000) => {
+    return new Promise((resolve, reject) => {
+      if (!BACKEND_WEBAPP_URL || !BACKEND_WEBAPP_URL.startsWith('https://script.google.com/')) {
+        reject(new Error('尚未設定 Apps Script Web App 網址'));
+        return;
+      }
+
+      const requestId = (globalThis.crypto?.randomUUID?.() || `wrines-${Date.now()}-${Math.random()}`);
+      const iframeName = `wrines_backend_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      const iframe = document.createElement('iframe');
+      const form = document.createElement('form');
+      let finished = false;
+
+      const cleanup = () => {
+        window.removeEventListener('message', onMessage);
+        if (form.parentNode) form.parentNode.removeChild(form);
+        if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+      };
+
+      const timer = setTimeout(() => {
+        if (finished) return;
+        finished = true;
+        cleanup();
+        reject(new Error('Apps Script 回應逾時'));
+      }, timeoutMs);
+
+      const onMessage = (event) => {
+        const data = event.data;
+        if (!data || data.source !== 'WRINES_BACKEND' || data.requestId !== requestId) return;
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        cleanup();
+        if (data.ok) resolve(data);
+        else reject(new Error(data.error || '後端處理失敗'));
+      };
+
+      window.addEventListener('message', onMessage);
+
+      iframe.name = iframeName;
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      form.method = 'POST';
+      form.action = BACKEND_WEBAPP_URL;
+      form.target = iframeName;
+      form.style.display = 'none';
+
+      const fullPayload = { ...payload, requestId };
+      Object.entries(fullPayload).forEach(([key, value]) => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = key;
+        input.value = value == null ? '' : String(value);
+        form.appendChild(input);
+      });
+
+      document.body.appendChild(form);
+      form.submit();
+    });
+  };
+
+  const saveResultToFirestore = async (profileToSave) => {
+    if (user && db) {
+      try {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'quizResults'), {
+          timestamp: serverTimestamp(),
+          userName,
+          scores,
+          resultProfile: profileToSave.charmName,
+          answers
+        });
+      } catch (e) {
+        console.error('Error saving result to Firestore:', e);
+      }
+    }
+  };
+
   const triggerAnalysis = async () => {
     setAppState('analyzing');
     setAiError(null);
 
     const answerDetails = questions.map(q => {
-      if(q.id >= 20 && q.id <= 29 && answers[q.id]) {
+      if (q.id >= 20 && q.id <= 29 && answers[q.id]) {
         return `Q: ${q.text} A: ${q.options ? q.options[answers[q.id]] : answers[q.id]}`;
       }
       return null;
@@ -288,25 +391,15 @@ ${answerDetails}
 `;
 
     try {
-      if (!AI_PROXY_URL) {
-        throw new Error("AI proxy 尚未設定");
-      }
-
-      const response = await fetch(AI_PROXY_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt })
+      const response = await postToAppsScript({
+        action: 'analyze',
+        prompt,
+        ...buildSheetPayload('')
       });
 
-      if (!response.ok) {
-        throw new Error(`AI proxy 回傳 ${response.status}`);
-      }
-
-      const data = await response.json();
-      const parsedProfile = data.profile || data;
-
+      const parsedProfile = response.profile;
       if (!parsedProfile?.charmName || !parsedProfile?.jewelry) {
-        throw new Error("AI proxy 回傳格式不完整");
+        throw new Error('Gemini 回傳格式不完整');
       }
 
       parsedProfile.finalScores = scores;
@@ -317,11 +410,10 @@ ${answerDetails}
 
       setFinalProfile(parsedProfile);
       setAppState('result');
-      saveResultToDB(parsedProfile);
-
+      saveResultToFirestore(parsedProfile);
     } catch (error) {
-      console.error("AI API 呼叫失敗，啟用備用方案:", error);
-      setAiError("AI 分析連線失敗，已為您切換至標準分析模式。");
+      console.error('AI / Google Sheet 後端呼叫失敗，啟用備用方案:', error);
+      setAiError('AI 連線失敗，已切換至標準分析模式；請檢查 Apps Script 設定。');
       calculateResultFallback();
     }
   };
@@ -332,19 +424,19 @@ ${answerDetails}
     const top2 = scoreEntries[1][0];
 
     const fallbackProfile = {
-      charmName: top1 === 'Power' ? "開界" : top1 === 'Warmth' ? "柔風" : "原石",
-      charmTitle: top1 === 'Power' ? "VANGUARD" : top1 === 'Warmth' ? "BREEZE" : "ESSENCE",
-      charmDesc: "你的魅力常在有主見卻不僵化的選擇中展現，既保有自己的方向，也能為新的可能留下空間。",
+      charmName: top1 === 'Power' ? '開界' : top1 === 'Warmth' ? '柔風' : '原石',
+      charmTitle: top1 === 'Power' ? 'VANGUARD' : top1 === 'Warmth' ? 'BREEZE' : 'ESSENCE',
+      charmDesc: '你的魅力常在有主見卻不僵化的選擇中展現，既保有自己的方向，也能為新的可能留下空間。',
       aboutYou: `你的 ${top1} 與 ${top2} 形成穩定的雙核心。你願意親自嘗試、尋找新方法，也能建立架構、承擔責任並推進成果。這是一份溫柔而堅定的力量。`,
-      tags: ["獨特", "真誠", "有風格"],
+      tags: ['獨特', '真誠', '有風格'],
       jewelry: {
-        line: "幾何俐落、精簡結構",
-        size: "中小型",
-        weight: "輕至中等",
-        shine: "乾淨金屬光澤",
-        testMatch: ["小型幾何金屬耳環", "結構俐落的細鍊墜飾", "有細節特色的簡約戒指"],
-        avoid: ["線條過度柔弱的款式", "只追求吸睛難以長期配戴的設計", "價格與材質不相稱的流行單品"],
-        stylingSuggestion: "你適合小巧、俐落且帶有設計辨識度的金屬飾品。外出可固定以一件熟悉的單品作為重點，選購時兼顧材質與做工會更符合你的習慣。"
+        line: '幾何俐落、精簡結構',
+        size: '中小型',
+        weight: '輕至中等',
+        shine: '乾淨金屬光澤',
+        testMatch: ['小型幾何金屬耳環', '結構俐落的細鍊墜飾', '有細節特色的簡約戒指'],
+        avoid: ['線條過度柔弱的款式', '只追求吸睛難以長期配戴的設計', '價格與材質不相稱的流行單品'],
+        stylingSuggestion: '你適合小巧、俐落且帶有設計辨識度的金屬飾品。外出可固定以一件熟悉的單品作為重點，選購時兼顧材質與做工會更符合你的習慣。'
       },
       finalScores: scores,
       traits: { top1, top2 }
@@ -352,93 +444,7 @@ ${answerDetails}
 
     setFinalProfile(fallbackProfile);
     setAppState('result');
-    saveResultToDB(fallbackProfile);
-  };
-
-  const saveResultToDB = async (profileToSave) => {
-    if (user && db) {
-      try {
-        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'quizResults'), {
-          timestamp: serverTimestamp(),
-          userName: userName,
-          scores: scores,
-          resultProfile: profileToSave.charmName,
-          answers: answers 
-        });
-      } catch (e) {
-        console.error("Error saving result to DB:", e);
-      }
-    }
-    
-    // 👇 確保這裡貼上您最新部署的 Apps Script 網址
-    const WEBHOOK_URL = GOOGLE_SHEET_WEBHOOK_URL;
-
-    if (WEBHOOK_URL && WEBHOOK_URL.startsWith("https://script.google.com/")) {
-      try {
-        // === 終極解法：建立隱藏表單，繞過所有 CORS 限制 ===
-        
-        // 1. 建立一個隱藏的 iframe，用來接收提交後的結果（避免網頁跳轉）
-        const iframeName = 'hidden_iframe_' + new Date().getTime();
-        const iframe = document.createElement('iframe');
-        iframe.name = iframeName;
-        iframe.style.display = 'none';
-        document.body.appendChild(iframe);
-
-        // 2. 建立一個隱藏的表單
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = WEBHOOK_URL;
-        form.target = iframeName; // 將表單送到隱藏的 iframe
-        form.style.display = 'none';
-
-        // 3. 準備要傳送的資料
-        const payload = {
-          userName: userName,
-          resultProfile: profileToSave.charmName,
-          warmth: scores.Warmth,
-          freedom: scores.Freedom,
-          power: scores.Power
-        };
-
-        // 處理 34 題的答案 (加上完整的文字)
-        questions.forEach(q => {
-            const ansKey = answers[q.id];
-            if (!ansKey) {
-                payload["q" + q.id] = "";
-            } else if (q.type === 'single' || q.type === 'multiple') {
-                payload["q" + q.id] = q.options && q.options[ansKey] ? `${ansKey}: ${q.options[ansKey]}` : ansKey;
-            } else {
-                payload["q" + q.id] = ansKey; 
-            }
-        });
-
-        // 4. 將資料轉成隱藏的 input 塞入表單
-        Object.keys(payload).forEach(key => {
-          const input = document.createElement('input');
-          input.type = 'hidden';
-          input.name = key;
-          input.value = payload[key];
-          form.appendChild(input);
-        });
-
-        document.body.appendChild(form);
-        
-        // 5. 發射！(提交表單)
-        form.submit();
-        console.log("資料已透過隱藏表單送出，保證無 CORS 阻擋！");
-
-        // 6. 清理戰場 (3秒後刪除隱藏表單與 iframe)
-        setTimeout(() => {
-          document.body.removeChild(form);
-          document.body.removeChild(iframe);
-        }, 3000);
-
-      } catch(e) {
-        console.error("隱藏表單發送失敗:", e);
-      }
-    } else {
-      console.warn("未設定有效的 GOOGLE_SHEET_WEBHOOK_URL。");
-    }
+    saveResultToFirestore(fallbackProfile);
   };
 
   const handleAdminLogin = (e) => {
