@@ -38,7 +38,7 @@ const appId = import.meta.env.VITE_FIREBASE_COLLECTION_ID || 'rines-charm-app';
 
 // Google Apps Script Web App：同時負責 Gemini AI 與 Google Sheet 儲存。
 // 這個網址可以公開；Gemini API Key 必須只存放在 Apps Script 的 Script Properties。
-const BACKEND_WEBAPP_URL = import.meta.env.VITE_GOOGLE_SHEET_WEBHOOK_URL || '';
+const BACKEND_WEBAPP_URL = import.meta.env.VITE_GOOGLE_SHEET_WEBHOOK_URL || 'https://script.google.com/macros/s/AKfycbyjrlbdjrjGxzA-kAUNEsWBDBiQIhVCDAI0rJ4PPcjoXJG4qhvkmDb5v4HmDz3J-iRP7Q/exec';
 
 // 公開靜態網站不應以前端明碼密碼保護管理資料。
 // 本專案預設停用後台登入；若要正式使用後台，請改用 Firebase Auth / 伺服器端驗證。
@@ -269,7 +269,7 @@ export default function App() {
     return payload;
   };
 
-  const postToAppsScript = (payload, timeoutMs = 70000) => {
+  const postToAppsScript = (payload, timeoutMs = 90000) => {
     return new Promise((resolve, reject) => {
       if (!BACKEND_WEBAPP_URL || !BACKEND_WEBAPP_URL.startsWith('https://script.google.com/')) {
         reject(new Error('尚未設定 Apps Script Web App 網址'));
@@ -296,7 +296,10 @@ export default function App() {
       }, timeoutMs);
 
       const onMessage = (event) => {
-        const data = event.data;
+        let data = event.data;
+        if (typeof data === 'string') {
+          try { data = JSON.parse(data); } catch (_) {}
+        }
         if (!data || data.source !== 'WRINES_BACKEND' || data.requestId !== requestId) return;
         if (finished) return;
         finished = true;
@@ -309,7 +312,18 @@ export default function App() {
       window.addEventListener('message', onMessage);
 
       iframe.name = iframeName;
-      iframe.style.display = 'none';
+      iframe.id = iframeName;
+      // 不使用 display:none，避免部分瀏覽器延後/抑制跨站 iframe 導航與腳本執行。
+      Object.assign(iframe.style, {
+        position: 'absolute',
+        width: '1px',
+        height: '1px',
+        left: '-9999px',
+        top: '-9999px',
+        border: '0',
+        opacity: '0',
+        pointerEvents: 'none'
+      });
       document.body.appendChild(iframe);
 
       form.method = 'POST';
