@@ -269,7 +269,7 @@ export default function App() {
     return payload;
   };
 
-  const postToAppsScript = (payload, timeoutMs = 90000) => {
+  const postToAppsScript = (payload, timeoutMs = 120000) => {
     return new Promise((resolve, reject) => {
       if (!BACKEND_WEBAPP_URL || !BACKEND_WEBAPP_URL.startsWith('https://script.google.com/')) {
         reject(new Error('尚未設定 Apps Script Web App 網址'));
@@ -280,49 +280,85 @@ export default function App() {
       const iframeName = `wrines_backend_${Date.now()}_${Math.random().toString(36).slice(2)}`;
       const iframe = document.createElement('iframe');
       const form = document.createElement('form');
-      let finished = false;
+      const startedAt = Date.now();
+      let stopped = false;
+      let pollTimer = null;
+      let lastPollError = '';
 
       const cleanup = () => {
-        window.removeEventListener('message', onMessage);
+        stopped = true;
+        if (pollTimer) clearTimeout(pollTimer);
         if (form.parentNode) form.parentNode.removeChild(form);
         if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
       };
 
-      const timer = setTimeout(() => {
-        if (finished) return;
-        finished = true;
+      const fail = (message) => {
+        if (stopped) return;
         cleanup();
-        reject(new Error('Apps Script 回應逾時'));
-      }, timeoutMs);
-
-      const onMessage = (event) => {
-        let data = event.data;
-        if (typeof data === 'string') {
-          try { data = JSON.parse(data); } catch (_) {}
-        }
-        if (!data || data.source !== 'WRINES_BACKEND' || data.requestId !== requestId) return;
-        if (finished) return;
-        finished = true;
-        clearTimeout(timer);
-        cleanup();
-        if (data.ok) resolve(data);
-        else reject(new Error(data.error || '後端處理失敗'));
+        reject(new Error(message));
       };
 
-      window.addEventListener('message', onMessage);
+      const jsonpStatus = () => new Promise((res, rej) => {
+        const cbName = `__wrines_cb_${Date.now()}_${Math.random().toString(36).slice(2)}`.replace(/[^A-Za-z0-9_$]/g, '_');
+        const script = document.createElement('script');
+        let done = false;
+
+        const finish = () => {
+          if (done) return;
+          done = true;
+          try { delete window[cbName]; } catch (_) { window[cbName] = undefined; }
+          if (script.parentNode) script.parentNode.removeChild(script);
+        };
+
+        const t = setTimeout(() => {
+          finish();
+          rej(new Error('狀態查詢逾時'));
+        }, 12000);
+
+        window[cbName] = (data) => {
+          clearTimeout(t);
+          finish();
+          res(data);
+        };
+
+        script.onerror = () => {
+          clearTimeout(t);
+          finish();
+          rej(new Error('無法讀取 Apps Script 狀態'));
+        };
+
+        const sep = BACKEND_WEBAPP_URL.includes('?') ? '&' : '?';
+        script.src = `${BACKEND_WEBAPP_URL}${sep}action=status&requestId=${encodeURIComponent(requestId)}&prefix=${encodeURIComponent(cbName)}&_=${Date.now()}`;
+        document.head.appendChild(script);
+      });
+
+      const poll = async () => {
+        if (stopped) return;
+        if (Date.now() - startedAt > timeoutMs) {
+          fail(`Apps Script 回應逾時${lastPollError ? `（最後錯誤：${lastPollError}）` : ''}`);
+          return;
+        }
+
+        try {
+          const data = await jsonpStatus();
+          if (data && data.source === 'WRINES_BACKEND' && data.requestId === requestId && !data.pending) {
+            cleanup();
+            if (data.ok) resolve(data);
+            else reject(new Error(data.error || '後端處理失敗'));
+            return;
+          }
+        } catch (err) {
+          lastPollError = err?.message || String(err);
+        }
+
+        pollTimer = setTimeout(poll, 1500);
+      };
 
       iframe.name = iframeName;
       iframe.id = iframeName;
-      // 不使用 display:none，避免部分瀏覽器延後/抑制跨站 iframe 導航與腳本執行。
       Object.assign(iframe.style, {
-        position: 'absolute',
-        width: '1px',
-        height: '1px',
-        left: '-9999px',
-        top: '-9999px',
-        border: '0',
-        opacity: '0',
-        pointerEvents: 'none'
+        position: 'absolute', width: '1px', height: '1px', left: '-9999px', top: '-9999px',
+        border: '0', opacity: '0', pointerEvents: 'none'
       });
       document.body.appendChild(iframe);
 
@@ -342,9 +378,9 @@ export default function App() {
 
       document.body.appendChild(form);
       form.submit();
+      pollTimer = setTimeout(poll, 1200);
     });
   };
-
   const saveResultToFirestore = async (profileToSave) => {
     if (user && db) {
       try {
@@ -427,7 +463,7 @@ ${answerDetails}
       saveResultToFirestore(parsedProfile);
     } catch (error) {
       console.error('AI / Google Sheet 後端呼叫失敗，啟用備用方案:', error);
-      setAiError('AI 連線失敗，已切換至標準分析模式；請檢查 Apps Script 設定。');
+      setAiError(`AI 連線失敗：${error?.message || '未知錯誤'}；已切換至標準分析模式。`);
       calculateResultFallback();
     }
   };
