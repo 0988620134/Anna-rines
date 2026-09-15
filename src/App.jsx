@@ -64,6 +64,7 @@ const scoringMap = {
   19: { A: 'Power', B: 'Freedom', C: 'Warmth' }
 };
 
+const IMAGE_BASE = `${import.meta.env.BASE_URL}images/`;
 const questions = [
   { id: 1, type: 'multiple', text: "你今天來做這份測驗，最希望得到什麼？ [多選題] *", options: { A: "更了解自己的個人魅力", B: "找到適合自己的風格", C: "提升自己的自信", D: "單純好奇" } },
   { id: 2, type: 'ranking', text: "如果這份測驗結果讓你很有共鳴，你會最想進一步獲得什麼？ [排序題] *", options: { A: "查看完整魅力報告", B: "查看適合自己的飾品推薦", C: "查看穿搭風格建議", D: "還好，沒有特別想看" } },
@@ -84,10 +85,10 @@ const questions = [
   { id: 17, type: 'single', text: "回顧那些你真正重視的成果時，你最容易覺得它們代表你是：", options: { A: "更相信自己是能承擔責任、完成目標的人", B: "更相信自己是能帶給別人正面影響的人", C: "更相信自己是願意忠於自己、走出自己道路的人" } },
   { id: 18, type: 'single', text: "當別人第一次認識你時，你最希望對方先感受到的是：", options: { A: "是一個有影響力、值得重視的人", B: "是一個讓人感到安心、容易親近的人", C: "是一個千變萬化、不容易被定義的人" } },
   { id: 19, type: 'single', text: "如果你發現自己的表達方式，不符合身邊大多數人的期待，你通常會：", options: { A: "如果改變會失去自己的特色，通常不會因為他人的期待而調整", B: "只要能維持自己想傳達的核心訊息，可以調整表達方式", C: "會優先調整表達方式，希望彼此都能自在地交流" } },
-  { id: 20, type: 'single', text: "下面哪一種飾品線條最吸引你？", image: "https://scontent.ftpe8-4.fna.fbcdn.net/v/t39.30808-6/748534244_27483348444691892_5577594842880799638_n.jpg?stp=dst-jpg_tt6&cstp=mx700x148&ctp=s700x148&_nc_cat=110&ccb=1-7&_nc_sid=aa7b47&_nc_ohc=pkAY3TPzbQEQ7kNvwFwPREm&_nc_oc=AdqJ0800l3NHAM5Nw0qUGhMsFASCM4B2zNZ_lWh72HWeC03nJOIV9UP-FijA9sREkCQ&_nc_zt=23&_nc_ht=scontent.ftpe8-4.fna&_nc_gid=e-ervbSMoLik_zJv4C2KJw&_nc_ss=7b2a8&oh=00_AQKADo83oOgk44WfCKSSOL_AN0bf4B3eJLA5TH-8hNCWkg&oe=6AA4DAA7", options: { A: "金屬光澤、質感簡約", B: "珍珠柔和、溫潤優雅", C: "個性有設計感、時尚有型" } },
-  { id: 21, type: 'single', text: "下面哪一種材質氛圍最符合你的喜好？",image: "https://scontent.ftpe8-3.fna.fbcdn.net/v/t39.30808-6/748520216_27483348514691885_6771845898835116325_n.jpg?stp=dst-jpg_tt6&cstp=mx700x148&ctp=s700x148&_nc_cat=111&ccb=1-7&_nc_sid=aa7b47&_nc_ohc=TEqYu85wg-YQ7kNvwHqNs4s&_nc_oc=AdpaOMDXbX0Idm5Oys0JtYOrNPNdy1gdlGvm8CtELXnkiEjzm3Wia1o9vdn5UVWyvpU&_nc_zt=23&_nc_ht=scontent.ftpe8-3.fna&_nc_gid=_dAi3Fqqnk7AcPIyV-BY6g&_nc_ss=7b2a8&oh=00_AQIWgWOY-1JLCJL6FrWYq3S-65hRLCTK3UlHkFYOkirY3g&oe=6AA5087D", options: { A: "金屬光澤、質感簡約", B: "珍珠柔和、溫潤優雅", C: "個性有設計感、時尚有型" } },
-  { id: 22, type: 'single', text: "你更偏好哪種飾品存在感？", image: "https://scontent.ftpe8-2.fna.fbcdn.net/v/t39.30808-6/748466085_27483348441358559_5876906661781516044_n.jpg?stp=dst-jpg_tt6&cstp=mx700x138&ctp=s700x138&_nc_cat=103&ccb=1-7&_nc_sid=aa7b47&_nc_ohc=cbRWpH51ieQQ7kNvwECzg31&_nc_oc=AdpLMrGeYm-RhrEBtc997iGHtGk54Q8seze8gD-fZ7qGHjgvT4yrVizl4WuLAIXxvvg&_nc_zt=23&_nc_ht=scontent.ftpe8-2.fna&_nc_gid=CxUVphCzY-PloBm4YkPCTg&_nc_ss=7b2a8&oh=00_AQK3wDCgHMjCXhbXJNaX3R_12N5aCuDMnVyhKH7-rvAUag&oe=6AA4DFC1",options: { A: "小巧細緻、低調優雅", B: "適中平衡、日常百搭", C: "吸睛亮點、風格突出" } },
-  { id: 23, type: 'single', text: "如果第一次見面，你希望飾品讓別人留下什麼樣的印象？", image: "https://scontent.ftpe8-2.fna.fbcdn.net/v/t39.30808-6/748327165_27483348704691866_4973989275636592503_n.jpg?stp=dst-jpg_tt6&cstp=mx700x348&ctp=s700x348&_nc_cat=100&ccb=1-7&_nc_sid=aa7b47&_nc_ohc=TsG4OdoWQY0Q7kNvwENdF18&_nc_oc=AdoM2ZnM9C8FCEvbTtncfStyrg9fR10KCKYc9_Mo_BemCqSjiJwTiyPrn_JMt4d4_HA&_nc_zt=23&_nc_ht=scontent.ftpe8-2.fna&_nc_gid=WHzuYFkHoLkd1FR9turNKw&_nc_ss=7b2a8&oh=00_AQKOFqPKAiCk3Chawe1eeakxphGMOt3WxcXESgZ8CPc9zQ&oe=6AA4E6DC",options: { A: "質感、精緻有型，展現專業與品味", B: "自然、舒服親切，給人溫暖好感", C: "獨特個性、有記憶點，讓人印象深刻" } },
+  { id: 20, type: 'single', text: "下面哪一種飾品線條最吸引你？", image: "${IMAGE_BASE}20.png", options: { A: "金屬光澤、質感簡約", B: "珍珠柔和、溫潤優雅", C: "個性有設計感、時尚有型" } },
+  { id: 21, type: 'single', text: "下面哪一種材質氛圍最符合你的喜好？",image:  "${IMAGE_BASE}21.png", options: { A: "金屬光澤、質感簡約", B: "珍珠柔和、溫潤優雅", C: "個性有設計感、時尚有型" } },
+  { id: 22, type: 'single', text: "你更偏好哪種飾品存在感？", image:  "${IMAGE_BASE}22.png",options: { A: "小巧細緻、低調優雅", B: "適中平衡、日常百搭", C: "吸睛亮點、風格突出" } },
+  { id: 23, type: 'single', text: "如果第一次見面，你希望飾品讓別人留下什麼樣的印象？", image:  "${IMAGE_BASE}23.png",options: { A: "質感、精緻有型，展現專業與品味", B: "自然、舒服親切，給人溫暖好感", C: "獨特個性、有記憶點，讓人印象深刻" } },
   { id: 24, type: 'single', text: "當兩件飾品都很喜歡，只能選一件時，你通常最容易因為哪個原因做決定？", options: { A: "它的設計最吸引我，看到就很喜歡", B: "它的品質、材質或做工，更讓我放心", C: "它的價格現在買最划算" } },
   { id: 25, type: 'single', text: "你覺得一件飾品「值得買」，通常是因為：", options: { A: "戴很多年仍然會喜歡，不容易退流行", B: "它能表現自己的風格，很有特色", C: "價格和品質都有達到你的標準" } },
   { id: 26, type: 'single', text: "即使很喜歡一件飾品，但最後沒有買，最常是因為：", options: { A: "不知道是不是值得這個價格", B: "不確定自己平常有沒有機會戴", C: "擔心買了之後，很快就不喜歡" } },
