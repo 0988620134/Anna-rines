@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ChevronRight } from 'lucide-react';
-import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
 
 const colors = {
   bg: '#F3EFE9',          
@@ -39,10 +38,6 @@ const appId = import.meta.env.VITE_FIREBASE_COLLECTION_ID || 'rines-charm-app';
 // Google Apps Script Web App：同時負責 Gemini AI 與 Google Sheet 儲存。
 // 這個網址可以公開；Gemini API Key 必須只存放在 Apps Script 的 Script Properties。
 const BACKEND_WEBAPP_URL = import.meta.env.VITE_GOOGLE_SHEET_WEBHOOK_URL || 'https://script.google.com/macros/s/AKfycbyjrlbdjrjGxzA-kAUNEsWBDBiQIhVCDAI0rJ4PPcjoXJG4qhvkmDb5v4HmDz3J-iRP7Q/exec';
-
-// 公開靜態網站不應以前端明碼密碼保護管理資料。
-// 本專案預設停用後台登入；若要正式使用後台，請改用 Firebase Auth / 伺服器端驗證。
-const DEMO_ADMIN_PASSWORD = import.meta.env.VITE_DEMO_ADMIN_PASSWORD || '';
 
 const scoringMap = {
   3:  { A: 'Warmth', B: 'Freedom', C: 'Power' },
@@ -112,7 +107,7 @@ export default function App() {
   const [finalProfile, setFinalProfile] = useState(null);
   const [aiError, setAiError] = useState(null);
   
-  // Admin state
+  // 問卷輸入狀態
   const [multiSelectValues, setMultiSelectValues] = useState([]);
   const [rankingValues, setRankingValues] = useState({});
   const [textInput, setTextInput] = useState('');
@@ -208,11 +203,18 @@ export default function App() {
 
   const submitText = () => {
     const qId = questions[currentQuestion].id;
-    setAnswers(prev => ({ ...prev, [qId]: textInput || '未填寫' }));
-    handleNextQuestion();
+    const finalText = textInput || '未填寫';
+    const nextAnswers = { ...answers, [qId]: finalText };
+    setAnswers(nextAnswers);
+
+    if (currentQuestion < questions.length - 1) {
+      setCurrentQuestion(prev => prev + 1);
+    } else {
+      triggerAnalysis(nextAnswers);
+    }
   };
 
-  const buildSheetPayload = (profileName = '') => {
+  const buildSheetPayload = (profileName = '', answerSource = answers) => {
     const payload = {
       userName,
       resultProfile: profileName,
@@ -222,7 +224,7 @@ export default function App() {
     };
 
     questions.forEach(q => {
-      const ansKey = answers[q.id];
+      const ansKey = answerSource[q.id];
       if (!ansKey) {
         payload['q' + q.id] = '';
       } else if (q.type === 'single') {
@@ -238,7 +240,7 @@ export default function App() {
     return payload;
   };
 
-  const postToAppsScript = (payload, timeoutMs = 120000) => {
+  const postToAppsScript = (payload, timeoutMs = 300000) => {
     return new Promise((resolve, reject) => {
       if (!BACKEND_WEBAPP_URL || !BACKEND_WEBAPP_URL.startsWith('https://script.google.com/')) {
         reject(new Error('尚未設定 Apps Script Web App 網址'));
@@ -366,13 +368,13 @@ export default function App() {
     }
   };
 
-  const triggerAnalysis = async () => {
+  const triggerAnalysis = async (answerSource = answers) => {
     setAppState('analyzing');
     setAiError(null);
 
     const answerDetails = questions.map(q => {
-      if (q.id >= 20 && q.id <= 29 && answers[q.id]) {
-        return `Q: ${q.text} A: ${q.options ? q.options[answers[q.id]] : answers[q.id]}`;
+      if (q.id >= 20 && q.id <= 29 && answerSource[q.id]) {
+        return `Q: ${q.text} A: ${q.options ? q.options[answerSource[q.id]] : answerSource[q.id]}`;
       }
       return null;
     }).filter(Boolean).join('\n');
@@ -413,7 +415,7 @@ ${answerDetails}
       const response = await postToAppsScript({
         action: 'analyze',
         prompt,
-        ...buildSheetPayload('')
+        ...buildSheetPayload('', answerSource)
       });
 
       const parsedProfile = response.profile;
@@ -466,10 +468,11 @@ ${answerDetails}
     saveResultToFirestore(fallbackProfile);
   };
 
+
   if (appState === 'home') {
     return (
-      <div className="min-h-screen text-[#333333] font-sans flex flex-col items-center justify-center p-6 relative" style={{ backgroundColor: colors.bg }}>
-        <div className="max-w-md w-full bg-white p-12 rounded-2xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.05)] text-center border" style={{ borderColor: colors.border }}>
+      <div className="min-h-screen text-[#333333] font-sans flex flex-col items-center justify-center px-4 py-8 sm:p-6 relative overflow-x-hidden" style={{ backgroundColor: colors.bg }}>
+        <div className="max-w-md w-full bg-white p-6 sm:p-8 md:p-12 rounded-2xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.05)] text-center border" style={{ borderColor: colors.border }}>
           <div className="text-xs tracking-[0.3em] mb-4 uppercase" style={{ color: colors.textMuted }}>Discover Your Essence</div>
           <h1 className="text-3xl font-light mb-8 tracking-[0.2em]" style={{ color: colors.textMain }}>W.RINES</h1>
           <h2 className="text-lg mb-6 font-medium tracking-[0.2em]">魅力探索測驗</h2>
@@ -487,8 +490,8 @@ ${answerDetails}
 
   if (appState === 'intro') {
     return (
-      <div className="min-h-screen text-[#333333] font-sans flex flex-col items-center justify-center p-6" style={{ backgroundColor: colors.bg }}>
-        <div className="max-w-2xl w-full bg-white p-10 md:p-14 rounded-2xl shadow-sm border" style={{ borderColor: colors.border }}>
+      <div className="min-h-screen text-[#333333] font-sans flex flex-col items-center justify-center px-4 py-8 sm:p-6" style={{ backgroundColor: colors.bg }}>
+        <div className="max-w-2xl w-full bg-white p-6 sm:p-8 md:p-14 rounded-2xl shadow-sm border" style={{ borderColor: colors.border }}>
           <h1 className="text-2xl font-medium mb-8 tracking-widest" style={{ color: colors.textMain }}>歡迎你開始這份測驗！</h1>
           <div className="space-y-6 text-sm leading-loose tracking-wide mb-12 text-justify" style={{ color: colors.textMuted }}>
             <p>每個人都有屬於自己的魅力。</p>
@@ -513,7 +516,7 @@ ${answerDetails}
 
   if (appState === 'analyzing') {
     return (
-      <div className="min-h-screen font-sans flex flex-col items-center justify-center p-6" style={{ backgroundColor: colors.bg, color: colors.textMain }}>
+      <div className="min-h-screen font-sans flex flex-col items-center justify-start sm:justify-center px-4 py-6 sm:p-6 overflow-x-hidden" style={{ backgroundColor: colors.bg, color: colors.textMain }}>
         <div className="text-center animate-pulse">
            <div className="w-16 h-16 border-4 border-t-transparent rounded-full animate-spin mx-auto mb-8" style={{ borderColor: colors.border, borderTopColor: colors.accent }}></div>
            <h2 className="text-lg tracking-[0.2em] font-light">正在為您生成專屬魅力報告...</h2>
@@ -586,7 +589,7 @@ ${answerDetails}
     };
 
     return (
-      <div className="min-h-screen font-sans flex flex-col items-center justify-center p-6" style={{ backgroundColor: colors.bg, color: colors.textMain }}>
+      <div className="min-h-screen font-sans flex flex-col items-center justify-start sm:justify-center px-4 py-6 sm:p-6 overflow-x-hidden" style={{ backgroundColor: colors.bg, color: colors.textMain }}>
         <div className="max-w-xl w-full flex flex-col items-center">
           <div className="text-center mb-10 w-full max-w-md">
             <h1 className="text-xl font-light tracking-[0.2em]">W.RINES</h1>
@@ -595,10 +598,10 @@ ${answerDetails}
             </div>
             <div className="text-xs mt-3 tracking-widest" style={{ color: colors.textMuted }}>{currentQuestion + 1} / {questions.length}</div>
           </div>
-          <div className="bg-white p-8 md:p-10 w-full rounded-2xl shadow-sm border mb-8 min-h-[160px] flex flex-col items-center justify-center text-center" style={{ borderColor: colors.border }}>
+          <div className="bg-white p-5 sm:p-8 md:p-10 w-full rounded-2xl shadow-sm border mb-8 min-h-[160px] flex flex-col items-center justify-center text-center" style={{ borderColor: colors.border }}>
             <h2 className="text-base leading-loose tracking-[0.1em]" style={{ color: colors.textMain, marginBottom: q.image ? '1.5rem' : '0' }}>{q.text}</h2>
             {q.image && (
-              <img src={q.image} alt="飾品參考圖" className="w-full max-w-lg rounded-sm object-contain" onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/800x260/faf9f7/8b8276?text=圖片載入失敗，請參考文字選項'; }} />
+              <img src={q.image} alt="飾品參考圖" className="w-full max-w-lg max-h-[240px] sm:max-h-[340px] md:max-h-[420px] rounded-sm object-contain" onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/800x260/faf9f7/8b8276?text=圖片載入失敗，請參考文字選項'; }} />
             )}
           </div>
           <div className="w-full max-w-md">{renderQuestionOptions()}</div>
@@ -620,7 +623,7 @@ ${answerDetails}
         <div className="max-w-[700px] w-full bg-[#F9F8F6] shadow-[0_20px_50px_-20px_rgba(0,0,0,0.1)] border" style={{ borderColor: colors.border }}>
           
           {/* ==================== PAGE 1 ==================== */}
-          <div className="p-10 md:p-16">
+          <div className="p-6 sm:p-8 md:p-16">
             <div className="text-center mb-16">
               <h1 className="text-3xl font-light tracking-[0.3em] mb-4">W.RINES</h1>
               <h2 className="text-xs tracking-[0.4em] uppercase" style={{ color: colors.textMuted }}>PERSONAL CHARM PROFILE</h2>
@@ -629,12 +632,12 @@ ${answerDetails}
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-16">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-16">
               <div>
                 <h3 className="text-[10px] font-medium tracking-[0.2em] mb-6 uppercase border-t pt-4" style={{ color: colors.textMuted, borderColor: colors.border }}>NAME STORY<br/>名稱解讀</h3>
                 <div className="mb-6">
                   <div className="text-[10px] tracking-[0.2em] uppercase mb-1" style={{ color: colors.textMuted }}>YOUR CHARM NAME</div>
-                  <h4 className="text-5xl font-light mb-2">{finalProfile.charmName}</h4>
+                  <h4 className="text-4xl sm:text-5xl font-light mb-2">{finalProfile.charmName}</h4>
                   <div className="text-sm tracking-[0.3em] uppercase" style={{ color: colors.textMuted }}>{finalProfile.charmTitle}</div>
                 </div>
                 <div className="text-xs tracking-[0.2em] mb-6 font-medium uppercase" style={{ color: colors.accent }}>
@@ -689,7 +692,7 @@ ${answerDetails}
           <div className="w-full h-4 bg-[#EAE7E0] shadow-inner"></div>
 
           {/* ==================== PAGE 2 ==================== */}
-          <div className="p-10 md:p-16">
+          <div className="p-6 sm:p-8 md:p-16">
             <h3 className="text-[10px] font-medium tracking-[0.2em] mb-10 text-center uppercase border-t border-b py-4" style={{ color: colors.textMuted, borderColor: colors.border }}>YOUR JEWELRY LANGUAGE</h3>
             
             <div className="grid grid-cols-2 md:grid-cols-4 gap-y-10 gap-x-6 text-sm text-center mb-16">
