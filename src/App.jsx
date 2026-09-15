@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp } from 'firebase/firestore';
-import { ChevronRight, Download, ArrowLeft, Shield } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
 
 const colors = {
@@ -104,7 +104,7 @@ const questions = [
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [appState, setAppState] = useState('home'); // 'home', 'intro', 'quiz', 'analyzing', 'result', 'adminLogin', 'admin'
+  const [appState, setAppState] = useState('home'); // 'home', 'intro', 'quiz', 'analyzing', 'result'
   const [userName, setUserName] = useState('');
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState({});
@@ -113,11 +113,6 @@ export default function App() {
   const [aiError, setAiError] = useState(null);
   
   // Admin state
-  const [adminPassword, setAdminPassword] = useState('');
-  const [adminData, setAdminData] = useState([]);
-  const [isLoadingData, setIsLoadingData] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
-  const [adminTab, setAdminTab] = useState('dashboard');
   const [multiSelectValues, setMultiSelectValues] = useState([]);
   const [rankingValues, setRankingValues] = useState({});
   const [textInput, setTextInput] = useState('');
@@ -139,33 +134,6 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
-
-  useEffect(() => {
-    if (appState === 'admin' && user && db) {
-      setIsLoadingData(true);
-      const resultsRef = collection(db, 'artifacts', appId, 'public', 'data', 'quizResults');
-      const q = query(resultsRef);
-      
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        const data = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        data.sort((a, b) => {
-          const timeA = a.timestamp?.toMillis() || 0;
-          const timeB = b.timestamp?.toMillis() || 0;
-          return timeB - timeA;
-        });
-        setAdminData(data);
-        setIsLoadingData(false);
-      }, (error) => {
-        console.error("Error fetching data:", error);
-        setErrorMsg("無法載入數據，請檢查權限。");
-        setIsLoadingData(false);
-      });
-      return () => unsubscribe();
-    }
-  }, [appState, user]);
 
   const handleStartIntro = () => setAppState('intro');
 
@@ -498,39 +466,6 @@ ${answerDetails}
     saveResultToFirestore(fallbackProfile);
   };
 
-  const handleAdminLogin = (e) => {
-    e.preventDefault();
-    if (!DEMO_ADMIN_PASSWORD) {
-      setErrorMsg('公開版預設停用後台登入。請依 README 改用安全的管理者驗證。');
-      return;
-    }
-    if (adminPassword === DEMO_ADMIN_PASSWORD) {
-      setAppState('admin');
-      setErrorMsg('');
-    } else {
-      setErrorMsg('密碼錯誤');
-    }
-  };
-
-  const exportToCSV = () => {
-    if (adminData.length === 0) return;
-    const questionHeaders = Array.from({length: 34}, (_, i) => `Q${i + 1}`);
-    const headers = ['測驗時間', '姓名/暱稱', '結果類型', 'Warmth分數', 'Freedom分數', 'Power分數', ...questionHeaders];
-    
-    const rows = adminData.map(item => {
-      const date = item.timestamp ? new Date(item.timestamp.toMillis()).toLocaleString() : 'N/A';
-      const name = item.userName || 'N/A';
-      const ansArray = Array.from({length: 34}, (_, i) => {
-        const ans = item.answers ? item.answers[i + 1] : '';
-        return `"${(ans || '').toString().replace(/"/g, '""')}"`;
-      });
-      return [
-        `"${date}"`, `"${name}"`, `"${item.resultProfile || 'N/A'}"`,
-        item.scores?.Warmth || 0, item.scores?.Freedom || 0, item.scores?.Power || 0,
-        ...ansArray
-      ].join(',');
-    });
-
     const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(','), ...rows].join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
@@ -544,9 +479,6 @@ ${answerDetails}
   if (appState === 'home') {
     return (
       <div className="min-h-screen text-[#333333] font-sans flex flex-col items-center justify-center p-6 relative" style={{ backgroundColor: colors.bg }}>
-        <button onClick={() => setAppState('adminLogin')} className="absolute top-6 right-6 transition-colors opacity-30 hover:opacity-100" style={{ color: colors.accent }}>
-          <Shield size={20} />
-        </button>
         <div className="max-w-md w-full bg-white p-12 rounded-2xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.05)] text-center border" style={{ borderColor: colors.border }}>
           <div className="text-xs tracking-[0.3em] mb-4 uppercase" style={{ color: colors.textMuted }}>Discover Your Essence</div>
           <h1 className="text-3xl font-light mb-8 tracking-[0.2em]" style={{ color: colors.textMain }}>W.RINES</h1>
@@ -833,44 +765,6 @@ ${answerDetails}
       </div>
     );
   }
-
-  if (appState === 'adminLogin') {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-6" style={{ backgroundColor: colors.bg }}>
-        <div className="w-full max-w-sm bg-white p-10 rounded-2xl shadow-sm border" style={{ borderColor: colors.border }}>
-          <button onClick={() => setAppState('home')} className="mb-8 transition-colors" style={{ color: colors.textMuted }}>
-            <ArrowLeft size={20} />
-          </button>
-          <h2 className="text-xl font-light tracking-[0.2em] text-center mb-8" style={{ color: colors.textMain }}>W.RINES 後台</h2>
-          <form onSubmit={handleAdminLogin}>
-            <input type="password" placeholder="輸入密碼 " className="w-full border-b py-3 mb-8 focus:outline-none tracking-widest text-sm text-center bg-transparent" style={{ borderColor: colors.border, color: colors.textMain }} value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} />
-            {errorMsg && <p className="text-red-500 text-xs text-center mb-6 tracking-wider">{errorMsg}</p>}
-            <button type="submit" className="w-full py-4 text-white text-sm tracking-[0.2em] hover:opacity-90 transition-opacity" style={{ backgroundColor: colors.accent }}>登入</button>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
-  if (appState === 'admin') {
-    const profileCounts = {};
-    const avgScores = { Warmth: 0, Freedom: 0, Power: 0 };
-    const dateCounts = {};
-
-    adminData.forEach(item => {
-      const p = item.resultProfile || '未完成';
-      profileCounts[p] = (profileCounts[p] || 0) + 1;
-      
-      if (item.scores) {
-        avgScores.Warmth += item.scores.Warmth || 0;
-        avgScores.Freedom += item.scores.Freedom || 0;
-        avgScores.Power += item.scores.Power || 0;
-      }
-      if (item.timestamp) {
-        const d = new Date(item.timestamp.toMillis()).toLocaleDateString();
-        dateCounts[d] = (dateCounts[d] || 0) + 1;
-      }
-    });
 
     const total = adminData.length || 1;
     const pieData = Object.keys(profileCounts).map(k => ({ name: k, value: profileCounts[k] }));
