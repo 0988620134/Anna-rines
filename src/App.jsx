@@ -85,9 +85,9 @@ const questions = [
   { id: 17, type: 'single', text: "回顧那些你真正重視的成果時，你最容易覺得它們代表你是：", options: { A: "更相信自己是能承擔責任、完成目標的人", B: "更相信自己是能帶給別人正面影響的人", C: "更相信自己是願意忠於自己、走出自己道路的人" } },
   { id: 18, type: 'single', text: "當別人第一次認識你時，你最希望對方先感受到的是：", options: { A: "是一個有影響力、值得重視的人", B: "是一個讓人感到安心、容易親近的人", C: "是一個千變萬化、不容易被定義的人" } },
   { id: 19, type: 'single', text: "如果你發現自己的表達方式，不符合身邊大多數人的期待，你通常會：", options: { A: "如果改變會失去自己的特色，通常不會因為他人的期待而調整", B: "只要能維持自己想傳達的核心訊息，可以調整表達方式", C: "會優先調整表達方式，希望彼此都能自在地交流" } },
-  { id: 20, type: 'single', text: "下面哪一種飾品線條最吸引你？", image: `${IMAGE_BASE}20.png `, options: { A: "金屬光澤、質感簡約", B: "珍珠柔和、溫潤優雅", C: "個性有設計感、時尚有型" } },
+  { id: 20, type: 'single', text: "下面哪一種飾品線條最吸引你？", image: `${IMAGE_BASE}20.png`, options: { A: "金屬光澤、質感簡約", B: "珍珠柔和、溫潤優雅", C: "個性有設計感、時尚有型" } },
   { id: 21, type: 'single', text: "下面哪一種材質氛圍最符合你的喜好？",image:  `${IMAGE_BASE}21.png`, options: { A: "金屬光澤、質感簡約", B: "珍珠柔和、溫潤優雅", C: "個性有設計感、時尚有型" } },
-  { id: 22, type: 'single', text: "你更偏好哪種飾品存在感？", image:  `${IMAGE_BASE}22.png `,options: { A: "小巧細緻、低調優雅", B: "適中平衡、日常百搭", C: "吸睛亮點、風格突出" } },
+  { id: 22, type: 'single', text: "你更偏好哪種飾品存在感？", image:  `${IMAGE_BASE}22.png`,options: { A: "小巧細緻、低調優雅", B: "適中平衡、日常百搭", C: "吸睛亮點、風格突出" } },
   { id: 23, type: 'single', text: "如果第一次見面，你希望飾品讓別人留下什麼樣的印象？", image:  `${IMAGE_BASE}23.png`,options: { A: "質感、精緻有型，展現專業與品味", B: "自然、舒服親切，給人溫暖好感", C: "獨特個性、有記憶點，讓人印象深刻" } },
   { id: 24, type: 'single', text: "當兩件飾品都很喜歡，只能選一件時，你通常最容易因為哪個原因做決定？", options: { A: "它的設計最吸引我，看到就很喜歡", B: "它的品質、材質或做工，更讓我放心", C: "它的價格現在買最划算" } },
   { id: 25, type: 'single', text: "你覺得一件飾品「值得買」，通常是因為：", options: { A: "戴很多年仍然會喜歡，不容易退流行", B: "它能表現自己的風格，很有特色", C: "價格和品質都有達到你的標準" } },
@@ -464,16 +464,6 @@ ${answerDetails}
     setFinalProfile(fallbackProfile);
     setAppState('result');
     saveResultToFirestore(fallbackProfile);
-  };
-
-    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(','), ...rows].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "RINES_Quiz_Data.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   };
 
   if (appState === 'home') {
